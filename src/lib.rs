@@ -1,4 +1,5 @@
 use concordium_std::{collections::*, *};
+use std::cmp;
 
 #[derive(Serialize, SchemaType)]
 struct Config {
@@ -33,8 +34,8 @@ impl From<ParseError> for InitError {
 enum ReceiveError {
     ParseParams,
     ZeroAmount,
+    ZeroBalance,
     HighAmount,
-    LowBalance,
     DoubleSend,
     NotOwner,
 }
@@ -78,8 +79,9 @@ fn giveaway_send<A: HasActions>(
     );
 
     let balance = ctx.self_balance();
-    let giveaway = amount * state.config.factor.into();
-    ensure!(balance >= giveaway, ReceiveError::LowBalance);
+    let desired_giveaway = amount * state.config.factor.into();
+    let giveaway = cmp::min(balance + amount, desired_giveaway);
+    ensure_ne!(giveaway, amount, ReceiveError::ZeroBalance);
 
     let invoker = ctx.invoker();
     ensure!(!state.senders.contains(&invoker), ReceiveError::DoubleSend);
@@ -109,7 +111,7 @@ fn giveaway_abort<A: HasActions>(
     _state: &mut State,
 ) -> Result<A, ReceiveError> {
     let balance = ctx.self_balance();
-    ensure_ne!(balance, Amount::zero(), ReceiveError::ZeroAmount);
+    ensure_ne!(balance, Amount::zero(), ReceiveError::ZeroBalance);
 
     let invoker = ctx.invoker();
     ensure_eq!(invoker, ctx.owner(), ReceiveError::NotOwner);
@@ -199,5 +201,31 @@ mod giveaway_tests {
             ReceiveError::DoubleSend,
             "Expected DoubleSend error"
         );
+    }
+
+    #[concordium_test]
+    fn test_send_low_balance() {
+        let account = AccountAddress([1u8; 32]);
+        let config = new_config(2, 10);
+
+        let mut ctx = ReceiveContextTest::empty();
+        ctx.set_invoker(account);
+        ctx.set_self_balance(Amount::from_gtu(2));
+
+        let mut state = State {
+            config,
+            senders: BTreeSet::new(),
+        };
+
+        let actions: ActionsTree = giveaway_send(&ctx, Amount::from_gtu(5), &mut state)
+            .unwrap_or_else(|_| fail!("Send failed"));
+
+        claim_eq!(
+            actions,
+            ActionsTree::simple_transfer(&account, Amount::from_gtu(7)),
+            "Send produced incorrect result"
+        );
+
+        claim_eq!(state.senders.len(), 1, "Send did not add sender");
     }
 }
