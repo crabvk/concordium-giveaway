@@ -110,13 +110,10 @@ fn giveaway_abort<A: HasActions>(
     _amount: Amount,
     _state: &mut State,
 ) -> Result<A, ReceiveError> {
-    let balance = ctx.self_balance();
-    ensure_ne!(balance, Amount::zero(), ReceiveError::ZeroBalance);
-
     let invoker = ctx.invoker();
     ensure_eq!(invoker, ctx.owner(), ReceiveError::NotOwner);
 
-    Ok(A::simple_transfer(&invoker, balance))
+    Ok(A::simple_transfer(&invoker, ctx.self_balance()))
 }
 
 #[concordium_cfg_test]
