@@ -35,7 +35,6 @@ enum ReceiveError {
     ParseParams,
     ZeroAmount,
     ZeroBalance,
-    HighAmount,
     DoubleSend,
     NotOwner,
 }
@@ -73,22 +72,24 @@ fn giveaway_send<A: HasActions>(
     state: &mut State,
 ) -> Result<A, ReceiveError> {
     ensure_ne!(amount, Amount::zero(), ReceiveError::ZeroAmount);
-    ensure!(
-        amount <= state.config.max_giveaway,
-        ReceiveError::HighAmount
-    );
+    let factor = state.config.factor as u64;
+
+    let expected_return = if amount > state.config.max_giveaway {
+        amount + state.config.max_giveaway * (factor - 1)
+    } else {
+        amount * factor
+    };
 
     let balance = ctx.self_balance();
-    let desired_giveaway = amount * state.config.factor.into();
-    let giveaway = cmp::min(balance + amount, desired_giveaway);
-    ensure_ne!(giveaway, amount, ReceiveError::ZeroBalance);
+    let actual_return = cmp::min(balance + amount, expected_return);
+    ensure_ne!(actual_return, amount, ReceiveError::ZeroBalance);
 
     let invoker = ctx.invoker();
     ensure!(!state.senders.contains(&invoker), ReceiveError::DoubleSend);
 
     state.senders.insert(invoker);
 
-    Ok(A::simple_transfer(&invoker, giveaway))
+    Ok(A::simple_transfer(&invoker, actual_return))
 }
 
 #[receive(contract = "giveaway", name = "topup", payable)]
@@ -220,6 +221,32 @@ mod giveaway_tests {
         claim_eq!(
             actions,
             ActionsTree::simple_transfer(&account, Amount::from_gtu(7)),
+            "Send produced incorrect result"
+        );
+
+        claim_eq!(state.senders.len(), 1, "Send did not add sender");
+    }
+
+    #[concordium_test]
+    fn test_send_big_amount() {
+        let account = AccountAddress([1u8; 32]);
+        let config = new_config(3, 10);
+
+        let mut ctx = ReceiveContextTest::empty();
+        ctx.set_invoker(account);
+        ctx.set_self_balance(Amount::from_gtu(100));
+
+        let mut state = State {
+            config,
+            senders: BTreeSet::new(),
+        };
+
+        let actions: ActionsTree = giveaway_send(&ctx, Amount::from_gtu(17), &mut state)
+            .unwrap_or_else(|_| fail!("Send failed"));
+
+        claim_eq!(
+            actions,
+            ActionsTree::simple_transfer(&account, Amount::from_gtu(37)),
             "Send produced incorrect result"
         );
 
