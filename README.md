@@ -1,5 +1,13 @@
-# Concordium Giveaway Smart Contract
+# Concordium giveaway smart contract
 
-```shell
-concordium-client contract update 20 --func send --amount <amount> --energy 1000 --sender <sender>
+A simple smart contract example for [Concordium](https://concordium.com/) blockchain.  
+You send it an amount of GTU, it gives you doubled (when factor is 2) amount back.
+
+Example config:
+
+```json
+{
+    "factor": 2,
+    "max_giveaway": "1000000000"
+}
 ```
